@@ -5,7 +5,10 @@ import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.log4j.Logger;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.reflect.MethodSignature;
-import org.mengyun.tcctransaction.*;
+import org.mengyun.tcctransaction.NoExistedTransactionException;
+import org.mengyun.tcctransaction.SystemException;
+import org.mengyun.tcctransaction.Transaction;
+import org.mengyun.tcctransaction.TransactionManager;
 import org.mengyun.tcctransaction.api.Compensable;
 import org.mengyun.tcctransaction.api.Propagation;
 import org.mengyun.tcctransaction.api.TransactionContext;
@@ -17,6 +20,7 @@ import org.mengyun.tcctransaction.utils.ReflectionUtils;
 import org.mengyun.tcctransaction.utils.TransactionUtils;
 
 import java.lang.reflect.Method;
+import java.util.Set;
 
 /**
  * Created by changmingxie on 10/30/15.
@@ -27,8 +31,14 @@ public class CompensableTransactionInterceptor {
 
     private TransactionManager transactionManager;
 
+    private Set<Class<? extends Exception>> delayCancelExceptions;
+
     public void setTransactionManager(TransactionManager transactionManager) {
         this.transactionManager = transactionManager;
+    }
+
+    public void setDelayCancelExceptions(Set<Class<? extends Exception>> delayCancelExceptions) {
+        this.delayCancelExceptions = delayCancelExceptions;
     }
 
     public Object interceptCompensableMethod(ProceedingJoinPoint pjp) throws Throwable {
@@ -71,8 +81,8 @@ public class CompensableTransactionInterceptor {
             try {
                 returnValue = pjp.proceed();
             } catch (Throwable tryingException) {
-                if (tryingException instanceof OptimisticLockException
-                        || ExceptionUtils.getRootCause(tryingException) instanceof OptimisticLockException) {
+
+                if (isDelayCancelException(tryingException)) {
 
                 } else {
                     logger.warn(String.format("compensable transaction trying failed. transaction content:%s", JSON.toJSONString(transaction)), tryingException);
@@ -129,5 +139,21 @@ public class CompensableTransactionInterceptor {
         return ReflectionUtils.getNullValue(method.getReturnType());
     }
 
+    private boolean isDelayCancelException(Throwable throwable) {
+
+        if (delayCancelExceptions != null) {
+            for (Class delayCancelException : delayCancelExceptions) {
+
+                Throwable rootCause = ExceptionUtils.getRootCause(throwable);
+
+                if (delayCancelException.isAssignableFrom(throwable.getClass())
+                        || (rootCause != null && delayCancelException.isAssignableFrom(rootCause.getClass()))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
 }
